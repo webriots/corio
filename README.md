@@ -7,7 +7,7 @@ Structured concurrency and batched I/O operations for Go, with an efficient CPU-
 
 ## How It Works
 
-Corio implements a novel scheduler that maximizes CPU utilization and I/O throughput:
+Corio implements a novel coroutine scheduler that maximizes CPU utilization and I/O throughput:
 
 1. **CPU Phase**: Tasks run until they need I/O, automatically collecting I/O requests
 2. **I/O Phase**: All accumulated I/O requests are batched and processed together
