@@ -1,13 +1,18 @@
 package corio
 
+// WaitGroup is used to wait for a collection of tasks to finish.
+// Tasks call Add(1) when they start and Done() when they finish.
+// Other tasks can call Wait() to block until all tasks have finished.
 type WaitGroup struct {
-	noCopy noCopy
-
-	v    int32
-	w    uint32
-	sema sema
+	noCopy noCopy // Prevents copying of the WaitGroup
+	v      int32  // Counter for the number of tasks
+	w      uint32 // Number of goroutines waiting
+	sema   sema   // Semaphore for queuing waiting tasks
 }
 
+// Add adds delta to the WaitGroup counter. If the counter becomes
+// zero and there are tasks waiting, they will be resumed. If the
+// counter goes negative, Add panics.
 func (wg *WaitGroup) Add(delta int) {
 	wg.v += int32(delta)
 
@@ -28,10 +33,14 @@ func (wg *WaitGroup) Add(delta int) {
 	}
 }
 
+// Done decrements the WaitGroup counter by one. It's a convenience
+// method equivalent to Add(-1).
 func (wg *WaitGroup) Done() {
 	wg.Add(-1)
 }
 
+// Wait blocks the calling task until the WaitGroup counter is zero.
+// If the counter is already zero, it returns immediately.
 func (wg *WaitGroup) Wait(task TaskBase) {
 	if wg.v == 0 {
 		return

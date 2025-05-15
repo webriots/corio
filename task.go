@@ -10,42 +10,57 @@ import (
 )
 
 const (
-	taskTraceTaskType   = "corio-task"
+	// taskTraceTaskType is the trace task type identifier for corio
+	// tasks.
+	taskTraceTaskType = "corio-task"
+	// taskTraceRegionType is the trace region type identifier for corio
+	// task regions.
 	taskTraceRegionType = "corio-region"
-	taskTraceCategory   = "corio"
+	// taskTraceCategory is the trace category for corio events.
+	taskTraceCategory = "corio"
 )
 
+// Task represents a coroutine-like unit of work that can perform I/O
+// operations. It can be suspended, resumed, and can spawn child
+// tasks.
 type Task[I, O any] struct {
-	ctx     context.Context
-	yield   func(I) O
-	suspend func() O
-	resume  func(O) (I, bool)
-	cancel  func()
-	ioq     *ioQueue[I, O]
-	single  *singleFlight
-	sched   *Schedule[I, O]
-	parent  *Task[I, O]
-	childn  int
-	norun   bool
+	ctx     context.Context   // Context for the task
+	yield   func(I) O         // Function to yield values to the coroutine
+	suspend func() O          // Function to suspend the coroutine
+	resume  func(O) (I, bool) // Function to resume the coroutine
+	cancel  func()            // Function to cancel the coroutine
+	ioq     *ioQueue[I, O]    // Queue for I/O requests
+	single  *singleFlight     // Deduplication of in-flight requests
+	sched   *Schedule[I, O]   // The schedule this task belongs to
+	parent  *Task[I, O]       // Parent task if this is a child task
+	childn  int               // Number of active child tasks
+	norun   bool              // Flag indicating if the task should not be run
 }
 
+// TaskBase defines the common interface for all task types. It
+// provides methods for task management, synchronization, and logging.
 type TaskBase interface {
-	Do(any, func() (any, error)) (any, error, bool)
-	Go(func(context.Context))
-	Group() ErrGroup
-	Wait()
+	// Public methods
+	Do(any, func() (any, error)) (any, error, bool) // Execute with deduplication
+	Go(func(context.Context))                       // Spawn a child task
+	Group() ErrGroup                                // Create an error group
+	Wait()                                          // Wait for child tasks
 
-	Log(string)
-	Logf(string, ...any)
+	// Logging methods
+	Log(string)          // Log a message
+	Logf(string, ...any) // Log a formatted message
 
-	context() context.Context
-	goctx(ctx context.Context, fn func(context.Context))
-	parenttask() TaskBase
-	runz()
-	suspendz()
-	setnorun(bool)
+	// Internal methods
+	context() context.Context                            // Get the task's context
+	goctx(ctx context.Context, fn func(context.Context)) // Start a child task with context
+	parenttask() TaskBase                                // Get the parent task
+	runz()                                               // Resume the task with zero value
+	suspendz()                                           // Suspend the task
+	setnorun(bool)                                       // Set the norun flag
 }
 
+// loop is the main event loop for task execution. It processes tasks
+// and their I/O operations until completion.
 func loop[I, O any](
 	ctx context.Context,
 	fn func(context.Context, *Task[I, O]),
@@ -112,6 +127,8 @@ func loop[I, O any](
 	trace.Log(ctx, taskTraceCategory, "LOOP DONE")
 }
 
+// newTask creates a new Task with the given context, function, and
+// parent. It initializes the task's state and sets up the coroutine.
 func newTask[I, O any](
 	ctx context.Context,
 	fn func(context.Context, *Task[I, O]),
@@ -158,29 +175,43 @@ func newTask[I, O any](
 	return task
 }
 
+// Do executes the given function with deduplication based on the key.
+// If multiple tasks call Do with the same key concurrently, only one
+// execution occurs. Returns the result, error (if any), and whether
+// this was a shared result.
 func (t *Task[I, O]) Do(key any, fn func() (any, error)) (any, error, bool) {
 	t.Logf("DO %v", key)
 	return t.single.do(t, key, fn)
 }
 
-func (t *Task[I, O]) gogoctx(ctx context.Context, fn func(context.Context, *Task[I, O])) {
+// runctx creates and starts a new task with the given context and
+// function. The new task is a child of the current task.
+func (t *Task[I, O]) runctx(ctx context.Context, fn func(context.Context, *Task[I, O])) {
 	task := newTask(ctx, fn, t)
 	task.Log("GO")
 	task.resumez()
 }
 
+// goctx adapts a context function to the task interface and runs it
+// as a child task.
 func (t *Task[I, O]) goctx(ctx context.Context, fn func(context.Context)) {
-	t.gogoctx(ctx, t.sched.Fn(fn))
+	t.runctx(ctx, t.sched.Fn(fn))
 }
 
-func (t *Task[I, O]) Gogo(fn func(context.Context, *Task[I, O])) {
-	t.gogoctx(t.ctx, fn)
+// Run spawns a child task with the given task function using the
+// current context.
+func (t *Task[I, O]) Run(fn func(context.Context, *Task[I, O])) {
+	t.runctx(t.ctx, fn)
 }
 
+// Go spawns a child task with the given context function. It adapts
+// the function to the task interface using Fn.
 func (t *Task[I, O]) Go(fn func(context.Context)) {
-	t.Gogo(t.sched.Fn(fn))
+	t.Run(t.sched.Fn(fn))
 }
 
+// IO performs an I/O operation with the given input. It queues the
+// request, suspends the task, and returns the result when resumed.
 func (t *Task[I, O]) IO(in I) O {
 	t.Log("IO")
 
@@ -191,10 +222,15 @@ func (t *Task[I, O]) IO(in I) O {
 	return t.suspend()
 }
 
+// Group creates a new error group associated with this task. The
+// error group can be used to run functions that return errors and
+// wait for their completion.
 func (t *Task[I, O]) Group() ErrGroup {
 	return newErrGroup(t)
 }
 
+// Wait suspends the current task until all child tasks complete. If
+// there are no child tasks, it returns immediately.
 func (t *Task[I, O]) Wait() {
 	t.Log("WAIT")
 
@@ -203,6 +239,8 @@ func (t *Task[I, O]) Wait() {
 	}
 }
 
+// run resumes the task with the given data. If the task completes or
+// cannot be resumed, it may resume the parent task.
 func (t *Task[I, O]) run(data O) {
 	t.Log("RUN")
 
@@ -223,29 +261,39 @@ func (t *Task[I, O]) run(data O) {
 	}
 }
 
+// context returns the context associated with this task.
 func (t *Task[I, O]) context() context.Context {
 	return t.ctx
 }
 
+// resumez attempts to resume the task with the zero value. Returns
+// whether the task was successfully resumed.
 func (t *Task[I, O]) resumez() bool {
 	var z O
 	_, ok := t.resume(z)
 	return ok
 }
 
+// runz runs the task with the zero value of type O.
 func (t *Task[I, O]) runz() {
 	var z O
 	t.run(z)
 }
 
+// suspendz suspends the task without providing a return value.
 func (t *Task[I, O]) suspendz() {
 	t.suspend()
 }
 
+// setnorun sets the norun flag for this task. When norun is true, the
+// task will not be automatically resumed.
 func (t *Task[I, O]) setnorun(b bool) {
 	t.norun = b
 }
 
+// parenttask returns the parent task of this task, implementing the
+// TaskBase interface. Returns nil if this task has no parent or if
+// the task is nil.
 func (t *Task[I, O]) parenttask() TaskBase {
 	if t == nil {
 		return nil
@@ -253,6 +301,8 @@ func (t *Task[I, O]) parenttask() TaskBase {
 	return t.parent
 }
 
+// Log adds a log message to the runtime trace if tracing is enabled.
+// The message is prefixed with the task's path in the task hierarchy.
 func (t *Task[I, O]) Log(msg string) {
 	if trace.IsEnabled() {
 		var sb strings.Builder
@@ -263,6 +313,9 @@ func (t *Task[I, O]) Log(msg string) {
 	}
 }
 
+// Logf adds a formatted log message to the runtime trace if tracing
+// is enabled. The message is prefixed with the task's path in the
+// task hierarchy.
 func (t *Task[I, O]) Logf(format string, args ...any) {
 	if trace.IsEnabled() {
 		var sb strings.Builder
@@ -273,6 +326,9 @@ func (t *Task[I, O]) Logf(format string, args ...any) {
 	}
 }
 
+// taskpath recursively builds a string representation of the task's
+// ancestry. It appends each task's pointer address, separated by '|',
+// to the string builder.
 func taskpath(sb *strings.Builder, t TaskBase) {
 	if t == nil {
 		return

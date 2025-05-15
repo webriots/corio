@@ -47,7 +47,7 @@ func (r *dispatch) Dispatch(
 				}
 			}
 			time.Sleep(r.sleep)
-			resp <- batch.Validate()
+			resp <- batch.validate()
 		}()
 	}
 }
@@ -59,7 +59,7 @@ func TestTask(t *testing.T) {
 	crud := func(_ context.Context, task *Task[string, string]) {
 		for i := 0; i < 10; i++ {
 			for j := 0; j < 10; j++ {
-				task.Gogo(func(_ context.Context, task *Task[string, string]) {
+				task.Run(func(_ context.Context, task *Task[string, string]) {
 					_ = task.IO(fmt.Sprintf("create %v", j))
 					_ = task.IO(fmt.Sprintf("read %v", j))
 					_ = task.IO(fmt.Sprintf("update %v", j))
@@ -70,7 +70,7 @@ func TestTask(t *testing.T) {
 		}
 	}
 
-	IO(new(dispatch)).Gogo(crud).Resume(context.Background())
+	IO(new(dispatch)).Run(crud).Resume(context.Background())
 
 	r.Equal(100, n)
 }
@@ -139,7 +139,7 @@ func TestGroup(t *testing.T) {
 	d.sleep = time.Microsecond
 	d.modRetry = math.MaxInt64
 
-	IO(d).Gogo(crud).Resume(context.Background())
+	IO(d).Run(crud).Resume(context.Background())
 
 	r.Equal(1, x)
 	r.Equal(100, y)
@@ -155,7 +155,7 @@ func TestMutex(t *testing.T) {
 		critical := 0
 		mux.Lock(task)
 
-		task.Gogo(func(ctx context.Context, task *Task[string, string]) {
+		task.Run(func(ctx context.Context, task *Task[string, string]) {
 			fmt.Printf("GO ONE\n")
 
 			mux.Lock(task)
@@ -169,7 +169,7 @@ func TestMutex(t *testing.T) {
 			fmt.Printf("MUTEX ONE\n")
 		})
 
-		task.Gogo(func(ctx context.Context, task *Task[string, string]) {
+		task.Run(func(ctx context.Context, task *Task[string, string]) {
 			fmt.Printf("GO TWO\n")
 
 			mux.Lock(task)
@@ -183,7 +183,7 @@ func TestMutex(t *testing.T) {
 			fmt.Printf("MUTEX TWO\n")
 		})
 
-		task.Gogo(func(ctx context.Context, task *Task[string, string]) {
+		task.Run(func(ctx context.Context, task *Task[string, string]) {
 			fmt.Printf("GO THREE\n")
 
 			mux.Lock(task)
@@ -201,7 +201,7 @@ func TestMutex(t *testing.T) {
 		n++
 	}
 
-	IO(new(dispatch)).Gogo(locks).Resume(context.Background())
+	IO(new(dispatch)).Run(locks).Resume(context.Background())
 
 	r.Equal(4, n)
 }
@@ -215,7 +215,7 @@ func TestMutexIO(t *testing.T) {
 		critical := 0
 		mux.Lock(task)
 
-		task.Gogo(func(ctx context.Context, task *Task[string, string]) {
+		task.Run(func(ctx context.Context, task *Task[string, string]) {
 			fmt.Printf("GO ONE\n")
 
 			mux.Lock(task)
@@ -229,7 +229,7 @@ func TestMutexIO(t *testing.T) {
 			_ = task.IO("MUTEX ONE")
 		})
 
-		task.Gogo(func(ctx context.Context, task *Task[string, string]) {
+		task.Run(func(ctx context.Context, task *Task[string, string]) {
 			fmt.Printf("GO TWO\n")
 
 			mux.Lock(task)
@@ -243,7 +243,7 @@ func TestMutexIO(t *testing.T) {
 			_ = task.IO("MUTEX TWO")
 		})
 
-		task.Gogo(func(ctx context.Context, task *Task[string, string]) {
+		task.Run(func(ctx context.Context, task *Task[string, string]) {
 			fmt.Printf("GO THREE\n")
 
 			mux.Lock(task)
@@ -265,7 +265,7 @@ func TestMutexIO(t *testing.T) {
 	d.sleep = time.Millisecond
 	d.modRetry = math.MaxInt64
 
-	IO(d).Gogo(locks).Resume(context.Background())
+	IO(d).Run(locks).Resume(context.Background())
 
 	r.Equal(4, n)
 }
@@ -279,7 +279,7 @@ func TestWaitGroup(t *testing.T) {
 
 		for i := 0; i < expect-1; i++ {
 			wg.Add(1)
-			task.Gogo(func(_ context.Context, task *Task[string, string]) {
+			task.Run(func(_ context.Context, task *Task[string, string]) {
 				defer wg.Done()
 				_ = task.IO(strconv.Itoa(i))
 				n++
@@ -290,7 +290,7 @@ func TestWaitGroup(t *testing.T) {
 		n++
 	}
 
-	IO(new(dispatch)).Gogo(locks).Resume(context.Background())
+	IO(new(dispatch)).Run(locks).Resume(context.Background())
 
 	r.Equal(expect, n)
 }
@@ -301,7 +301,7 @@ func TestSingleFlight(t *testing.T) {
 	n := 0
 	single := func(_ context.Context, task *Task[string, string]) {
 		for i := 0; i < 100; i++ {
-			task.Gogo(func(_ context.Context, task *Task[string, string]) {
+			task.Run(func(_ context.Context, task *Task[string, string]) {
 				v, err, shared := task.Do("test-key", func() (any, error) {
 					defer func() { n++ }()
 					return task.IO(strconv.Itoa(i)), nil
@@ -314,7 +314,7 @@ func TestSingleFlight(t *testing.T) {
 		n++
 	}
 
-	IO(new(dispatch)).Gogo(single).Resume(context.Background())
+	IO(new(dispatch)).Run(single).Resume(context.Background())
 
 	r.Equal(2, n)
 }
@@ -325,10 +325,10 @@ func TestPanic(t *testing.T) {
 	err := fmt.Errorf("UH OH")
 
 	fn := func(_ context.Context, task *Task[string, string]) {
-		task.Gogo(func(_ context.Context, task *Task[string, string]) {
-			task.Gogo(func(_ context.Context, task *Task[string, string]) {
-				task.Gogo(func(_ context.Context, task *Task[string, string]) {
-					task.Gogo(func(_ context.Context, task *Task[string, string]) {
+		task.Run(func(_ context.Context, task *Task[string, string]) {
+			task.Run(func(_ context.Context, task *Task[string, string]) {
+				task.Run(func(_ context.Context, task *Task[string, string]) {
+					task.Run(func(_ context.Context, task *Task[string, string]) {
 						panic(err)
 					})
 				})
@@ -346,5 +346,5 @@ func TestPanic(t *testing.T) {
 		}
 	}()
 
-	IO(new(dispatch)).Gogo(fn).Resume(context.Background())
+	IO(new(dispatch)).Run(fn).Resume(context.Background())
 }

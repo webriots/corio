@@ -35,7 +35,7 @@ func (*batchIO) Dispatch(
 func main() {
 	prog := func(_ context.Context, task *corio.Task[string, int]) {
 		for i := 0; i < 10; i++ {
-			task.Gogo(func(_ context.Context, task *corio.Task[string, int]) {
+			task.Run(func(_ context.Context, task *corio.Task[string, int]) {
 				_ = task.IO(fmt.Sprintf("create %v", i))
 				_ = task.IO(fmt.Sprintf("read %v", i))
 				_ = task.IO(fmt.Sprintf("update %v", i))
@@ -44,7 +44,7 @@ func main() {
 		}
 	}
 
-	corio.IO(new(batchIO)).Gogo(prog).Resume(context.Background())
+	corio.IO(new(batchIO)).Run(prog).Resume(context.Background())
 }
 ```
 
