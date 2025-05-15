@@ -1,3 +1,30 @@
+# corio
+
+[![Go Reference](https://pkg.go.dev/badge/github.com/webriots/corio.svg)](https://pkg.go.dev/github.com/webriots/corio)
+[![Go Report Card](https://goreportcard.com/badge/github.com/webriots/corio)](https://goreportcard.com/report/github.com/webriots/corio)
+
+Structured concurrency and batched I/O operations for Go.
+
+## Features
+
+- Coroutine-like task scheduling with suspendable functions
+- Batched I/O operations for improved performance
+- Concurrent task management with parent-child relationships
+- Full generic support for handling different input/output types
+- Synchronization primitives:
+  - `Mutex` for mutual exclusion
+  - `WaitGroup` for synchronized task completion
+  - `ErrGroup` for handling errors from concurrent tasks
+  - `SingleFlight` for deduplicating identical in-flight requests
+
+## Installation
+
+```bash
+go get github.com/webriots/corio
+```
+
+## Quick Start
+
 ```go
 package main
 
@@ -58,3 +85,124 @@ $
 ```
 
 [Playground](https://go.dev/play/p/yApJXqMCbe2)
+
+## Core Concepts
+
+### Tasks
+
+Tasks are the core unit of work in corio. They can:
+- Perform I/O operations with `task.IO()`
+- Spawn child tasks with `task.Go()` or `task.Run()`
+- Wait for child tasks with `task.Wait()`
+- Use synchronization primitives like `Mutex`, `WaitGroup`, and `ErrGroup`
+- Deduplicate identical operations with `task.Do()`
+
+```go
+task.Run(func(ctx context.Context, task *corio.Task[string, int]) {
+    // This is a child task
+    result := task.IO("some input")
+    // Process result...
+})
+```
+
+### I/O Operations
+
+I/O operations are processed through a custom dispatcher that can batch related requests:
+
+```go
+// Define a custom dispatcher
+type myDispatcher struct{}
+
+func (d *myDispatcher) Dispatch(
+    ctx context.Context,
+    alloc *corio.IOAllocator[string, int],
+    sema chan struct{},
+    reqs []*corio.IORequest[string, int],
+    resp chan *corio.IOBatch[string, int],
+) {
+    // Implementation that processes batches of I/O requests
+    batch := alloc.NewBatch(reqs...)
+
+    // Process in a goroutine with concurrency limiting
+    go func() {
+        sema <- struct{}{} // Acquire semaphore
+        defer func() { <-sema }() // Release semaphore
+
+        // Set responses for each request
+        for i, req := range reqs {
+            // Process req.GetData() and create response
+            alloc.SetBatchResponse(batch, i, i)
+        }
+
+        // Send completed batch back through response channel
+        resp <- batch.validate()
+    }()
+}
+
+// Create a schedule with the dispatcher
+sched := corio.IO[string, int](new(myDispatcher))
+```
+
+### Synchronization
+
+corio provides several synchronization primitives:
+
+```go
+// Mutex for mutual exclusion
+var mutex corio.Mutex
+mutex.Lock(task)
+// Critical section
+mutex.Unlock()
+
+// WaitGroup for waiting on multiple tasks
+var wg corio.WaitGroup
+wg.Add(1)
+task.Go(func(ctx context.Context) {
+    defer wg.Done()
+    // Task work...
+})
+wg.Wait(task)
+
+// ErrGroup for handling errors
+group := task.Group()
+group.Go(func(ctx context.Context) error {
+    // Task that can return an error
+    return nil
+})
+err := group.Wait(task)
+```
+
+### SingleFlight Pattern
+
+Deduplicate identical in-flight requests:
+
+```go
+value, err, shared := task.Do("cache-key", func() (any, error) {
+    // Expensive operation that will only be executed once
+    // for concurrent requests with the same key
+    return task.IO("expensive-operation"), nil
+})
+```
+
+## Use Cases
+
+- HTTP/API servers processing batched requests
+- Database operations that can be optimized by batching
+- Task orchestration with complex dependencies
+- File and network I/O with efficient resource utilization
+- Stateful workflows where tasks need to be suspended/resumed
+
+## Performance Considerations
+
+- Use batched I/O operations for better performance with high-volume I/O
+- The dispatcher controls how I/O requests are processed (sequentially, parallel, or a hybrid approach)
+- Default semaphore limit is 128 concurrent I/O operations
+- Task scheduling is cooperative; tasks suspend themselves during I/O
+
+## Contributing
+
+Contributions are welcome! Please feel free to submit a Pull Request.
+
+## License
+
+This project is licensed under the [MIT License](LICENSE).
