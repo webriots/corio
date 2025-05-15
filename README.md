@@ -75,16 +75,7 @@ func main() {
 }
 ```
 
-```sh
-$ go run hello.go
-10 IO requests batched
-10 IO requests batched
-10 IO requests batched
-10 IO requests batched
-$
-```
-
-[Playground](https://go.dev/play/p/yApJXqMCbe2)
+[Playground](https://go.dev/play/p/XGq_owL7TEs)
 
 ## Core Concepts
 
