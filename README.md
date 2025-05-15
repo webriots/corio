@@ -103,9 +103,9 @@ The corio scheduler follows a deterministic, efficient execution model:
 │  suspended on   │     │  process them   │     │  results        │    │
 │  I/O operations │     │  concurrently   │     │                 │    │
 └─────────────────┘     └─────────────────┘     └─────────────────┘    │
-        ▲                                                               │
-        │                                                               │
-        └───────────────────────────────────────────────────────────────┘
+        ▲                                                              │
+        │                                                              │
+        └──────────────────────────────────────────────────────────────┘
                                 Repeat until
                               all tasks complete
 ```
